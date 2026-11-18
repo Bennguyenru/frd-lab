@@ -33,8 +33,11 @@ Live site: https://bennguyenru.github.io/frd-lab/
 
 Public sign-up is switched off. Admins add people from **Settings → Add an account**:
 
+* **Add many members at once**: paste rows (full name, student ID, class, email, phone) copied from Excel or Google Sheets, check the list, then create all accounts. The site shows each temporary password once, with Copy and Download CSV.
 * **Create with temporary password**: the site shows a one-time password to pass on. The person must choose their own at first sign-in. No email is needed.
 * **Send invite email**: Supabase emails a link to choose a password. The built-in Supabase mailer sends only a few emails per hour, so set up custom SMTP (Authentication → Emails → SMTP settings) before inviting many people at once.
+
+Phone numbers are stored in a separate `contacts` table that only the member and the admins can read. Student ID and class are visible to the lab.
 
 To make someone admin from the Supabase SQL editor: `select make_admin('name@example.com');`
 

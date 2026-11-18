@@ -18,6 +18,7 @@ create table if not exists public.profiles (
   must_change_password boolean not null default false,
   created_at timestamptz not null default now()
 );
+alter table public.profiles add column if not exists class_name text not null default '';
 
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -223,6 +224,13 @@ create table if not exists public.grades (
   primary key (assignment_id, user_id)
 );
 
+-- Phone numbers are private: only the member and admins can read them.
+create table if not exists public.contacts (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  phone text not null default '',
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.directions (
   user_id uuid primary key references public.profiles(id) on delete cascade,
   body text not null default '',
@@ -304,7 +312,7 @@ begin
   if tg_table_name = 'grades' then new.graded_by := auth.uid(); new.graded_at := now(); end if;
   if tg_table_name in ('report_feedback') then new.created_by := auth.uid(); new.updated_at := now(); end if;
   if tg_table_name = 'directions' then new.updated_by := auth.uid(); new.updated_at := now(); end if;
-  if tg_table_name = 'rsvps' then new.updated_at := now(); end if;
+  if tg_table_name in ('rsvps','contacts') then new.updated_at := now(); end if;
   return new;
 end $$;
 
@@ -315,7 +323,7 @@ begin
     execute format('drop trigger if exists stamp_owner on public.%I', t);
     execute format('create trigger stamp_owner before insert or update on public.%I for each row execute function public.stamp_owner()', t);
   end loop;
-  foreach t in array array['reports','submissions','grades','report_feedback','directions','rsvps'] loop
+  foreach t in array array['reports','submissions','grades','report_feedback','directions','rsvps','contacts'] loop
     execute format('drop trigger if exists stamp_user_row on public.%I', t);
     execute format('create trigger stamp_user_row before insert or update on public.%I for each row execute function public.stamp_user_row()', t);
   end loop;
@@ -329,7 +337,7 @@ declare r record;
 begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
     and tablename in ('profiles','settings','assignments','meetings','rsvps','attendance','topics','comments',
-                      'library','papers','reports','report_feedback','submissions','grades','directions')
+                      'library','papers','reports','report_feedback','submissions','grades','directions','contacts')
   loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
@@ -350,6 +358,7 @@ alter table public.report_feedback enable row level security;
 alter table public.submissions enable row level security;
 alter table public.grades enable row level security;
 alter table public.directions enable row level security;
+alter table public.contacts enable row level security;
 
 -- profiles: active members see the roster; everyone sees their own row
 create policy profiles_read on public.profiles for select to authenticated
@@ -406,6 +415,13 @@ create policy submissions_read on public.submissions for select to authenticated
 create policy submissions_insert on public.submissions for insert to authenticated with check (public.is_active() and user_id = auth.uid());
 create policy submissions_update on public.submissions for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+create policy contacts_read on public.contacts for select to authenticated using (user_id = auth.uid() or public.is_admin());
+create policy contacts_insert on public.contacts for insert to authenticated
+  with check ((public.is_active() and user_id = auth.uid()) or public.is_admin());
+create policy contacts_update on public.contacts for update to authenticated
+  using (user_id = auth.uid() or public.is_admin()) with check (user_id = auth.uid() or public.is_admin());
+create policy contacts_delete on public.contacts for delete to authenticated using (public.is_admin());
+
 -- manager feedback: members read their own, only managers write
 do $$
 declare t text;
@@ -425,7 +441,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['profiles','settings','assignments','meetings','rsvps','attendance','topics','comments',
-                           'library','papers','reports','report_feedback','submissions','grades','directions'] loop
+                           'library','papers','reports','report_feedback','submissions','grades','directions','contacts'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object or undefined_object then null;

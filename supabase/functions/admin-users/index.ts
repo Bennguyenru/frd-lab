@@ -51,7 +51,10 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action ?? "");
     const role = body.role === "admin" ? "admin" : "member";
-    const fullName = String(body.full_name ?? "").slice(0, 120);
+    const fullName = String(body.full_name ?? "").trim().slice(0, 120);
+    const studentId = String(body.student_id ?? "").trim().toUpperCase().slice(0, 40);
+    const className = String(body.class_name ?? "").trim().toUpperCase().slice(0, 40);
+    const phone = String(body.phone ?? "").replace(/[^\d+]/g, "").slice(0, 20);
 
     if (action === "create" || action === "invite") {
       const email = String(body.email ?? "").trim().toLowerCase();
@@ -72,9 +75,12 @@ Deno.serve(async (req) => {
         if (error) return json({ error: error.message }, 400);
         userId = data.user.id;
       }
-      const { error: pErr } = await admin.from("profiles")
-        .upsert({ id: userId, email, full_name: fullName, role, must_change_password: action === "create" });
+      const { error: pErr } = await admin.from("profiles").upsert({
+        id: userId, email, full_name: fullName, role, must_change_password: action === "create",
+        student_id: studentId, class_name: className,
+      });
       if (pErr) return json({ error: pErr.message }, 400);
+      if (phone) await admin.from("contacts").upsert({ user_id: userId, phone });
       return json({ ok: true, id: userId, email, password });
     }
 
