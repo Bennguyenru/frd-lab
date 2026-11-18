@@ -95,6 +95,10 @@ create table if not exists public.settings (
   updated_at timestamptz not null default now()
 );
 insert into public.settings (id) values (1) on conflict (id) do nothing;
+-- Check-in only from the school network (public IP of the campus Wi-Fi).
+alter table public.settings add column if not exists campus_only boolean not null default false;
+alter table public.settings add column if not exists campus_nets text[] not null default '{}';
+alter table public.settings add column if not exists campus_wifi text not null default 'Gre_Guest';
 
 create table if not exists public.assignments (
   id text primary key default gen_random_uuid()::text,
@@ -241,6 +245,45 @@ create table if not exists public.directions (
 -- ------------------------------------------------------------------
 -- Server-side guards
 -- ------------------------------------------------------------------
+-- The caller's public IP. Supabase sits behind Cloudflare, which sets cf-connecting-ip
+-- itself; a browser or script cannot replace it.
+create or replace function public.client_ip() returns inet
+language plpgsql stable set search_path = public as $$
+declare h json; v text;
+begin
+  begin h := nullif(current_setting('request.headers', true), '')::json; exception when others then return null; end;
+  v := trim(h->>'cf-connecting-ip');
+  begin return v::inet; exception when others then return null; end;
+end $$;
+
+-- True when check-in from anywhere is allowed, or the caller is on a listed school network.
+create or replace function public.on_campus() returns boolean
+language plpgsql stable security definer set search_path = public as $$
+declare req boolean; nets text[]; ip inet := public.client_ip(); n text;
+begin
+  select campus_only, campus_nets into req, nets from public.settings where id = 1;
+  if not coalesce(req, false) then return true; end if;
+  if ip is null then return false; end if;
+  foreach n in array coalesce(nets, '{}') loop
+    begin
+      if n::inet >>= ip then return true; end if;
+    exception when others then null;
+    end;
+  end loop;
+  return false;
+end $$;
+
+create or replace function public.campus_status() returns json
+language sql stable security definer set search_path = public as $$
+  select json_build_object(
+    'ip', host(public.client_ip()),
+    'required', coalesce((select campus_only from public.settings where id = 1), false),
+    'wifi', coalesce((select campus_wifi from public.settings where id = 1), ''),
+    'ok', public.on_campus())
+$$;
+revoke execute on function public.campus_status() from public, anon;
+grant execute on function public.campus_status() to authenticated;
+
 -- Check-in time always comes from the server clock, members only check in for today,
 -- and only managers can confirm attendance or change past days.
 create or replace function public.guard_attendance() returns trigger
@@ -260,6 +303,7 @@ begin
     if new.day < public.local_today() then raise exception 'Past days cannot be changed.'; end if;
     if new.checked_in_at is not null then
       if new.day <> public.local_today() then raise exception 'You can only check in for today.'; end if;
+      if not public.on_campus() then raise exception 'off_campus'; end if;
       new.checked_in_at := now(); new.booked := true;
     end if;
   else
@@ -270,6 +314,7 @@ begin
         if old.confirmed_by is not null then raise exception 'An admin confirmed this day, so it cannot be undone here.'; end if;
       else
         if new.day <> public.local_today() then raise exception 'You can only check in for today.'; end if;
+        if old.checked_in_at is null and not public.on_campus() then raise exception 'off_campus'; end if;
         new.checked_in_at := coalesce(old.checked_in_at, now()); new.booked := true;
       end if;
     end if;

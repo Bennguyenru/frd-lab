@@ -12,7 +12,7 @@ Live site: https://bennguyenru.github.io/frd-lab/
 | Dashboard | Streak, XP, achievements, own work and activity | Lab overview, member progress, publication pipeline, announcement |
 | Classroom | Read posts, submit work, see grades | Post assignments, discussions and materials; grade with feedback |
 | Meetings | Calendar, reply attending or absent | Schedule, edit and delete meetings |
-| Attendance | Book lab days, check in for today | Weekly register, confirm attendance, export CSV |
+| Attendance | Book lab days, check in for today (optionally only on the school Wi-Fi) | Weekly register, confirm attendance, export CSV |
 | Discussion | Open topics, reply | Moderate |
 | Library | Add papers by DOI (Crossref), copy APA 7 references, export CSV | Same, plus moderation |
 | Publications | Track own papers from idea to published | Move any paper between stages |
@@ -35,9 +35,16 @@ Public sign-up is switched off. Admins add people from **Settings → Add an acc
 
 * **Add many members at once**: paste rows (full name, student ID, class, email, phone) copied from Excel or Google Sheets, check the list, then create all accounts. The site shows each temporary password once, with Copy and Download CSV.
 * **Create with temporary password**: the site shows a one-time password to pass on. The person must choose their own at first sign-in. No email is needed.
-* **Send invite email**: Supabase emails a link to choose a password. The built-in Supabase mailer sends only a few emails per hour, so set up custom SMTP (Authentication → Emails → SMTP settings) before inviting many people at once.
+* **Forgotten passwords**: an admin presses **New password** next to the person in Settings and passes the new temporary password on. No email is sent (the built-in Supabase mailer only reaches project team addresses and a few messages per hour).
 
 Phone numbers are stored in a separate `contacts` table that only the member and the admins can read. Student ID and class are visible to the lab.
+
+## Check-in only on the school Wi-Fi
+
+A browser cannot read the Wi-Fi name, so the rule works on the school's public internet address instead.
+In **Settings → Check-in network**, an admin who is connected to the school Wi-Fi presses **Add the network I am on now**, ticks the rule and saves.
+From then on the database (`guard_attendance`, `on_campus()`) refuses a member's check-in unless the request comes from a listed address. The address is read from the `cf-connecting-ip` header that Cloudflare sets in front of Supabase, which a member cannot change.
+Booking days still works from anywhere and admins can always confirm attendance. If the school changes its internet line, a member on the Wi-Fi sees their address on the Attendance page; add it to the list.
 
 To make someone admin from the Supabase SQL editor: `select make_admin('name@example.com');`
 

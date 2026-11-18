@@ -141,6 +141,7 @@ pre,.scroll{overflow-x:auto}
 .authbody{padding:26px 28px 28px}.authbody .logo{padding:0 0 14px}
 .at{font-size:24px;margin:0 0 4px;color:var(--ink);font-weight:700}
 .amsg{background:var(--soft2);border-left:4px solid var(--b);padding:10px 12px;border-radius:8px;color:var(--ink);font-size:14px}
+.net{background:var(--soft2);border-left:4px solid var(--b);padding:10px 12px;border-radius:8px;font-size:14px;margin:8px 0 14px}.net.ok{border-color:var(--ok)}.net.bad{border-color:var(--bad)}
 .avi{width:36px;height:36px;border-radius:50%;flex:none;background:var(--gT);color:var(--g);display:grid;place-items:center;font-weight:700;font-size:14px}
 .pw{font:600 20px/1.3 ui-monospace,Menlo,Consolas,monospace;background:var(--soft2);border:1px dashed var(--line);border-radius:8px;padding:12px;text-align:center;letter-spacing:.04em;color:var(--ink)}
 @media(max-width:1000px){.main2{grid-template-columns:minmax(0,1fr)}}
@@ -250,7 +251,7 @@ const ups=(t,row,on)=>q(SB.from(t).upsert(row,{onConflict:on}).select());
 const del=(t,match)=>q(SB.from(t).delete().match(match));
 function W(path,patch){const p=wRoute(path,patch||{}).then(()=>reload());p.catch(fail);return p}
 async function wRoute(path,patch){const[col,u]=path.split('/');
-  if(col==='cfg'){const row={updated_at:tsNow()};if('minDays'in patch)row.min_days=patch.minDays;if('days'in patch)row.open_days=patch.days;if('direction'in patch)row.direction=patch.direction;if('goals'in patch)row.goals=patch.goals;
+  if(col==='cfg'){const row={updated_at:tsNow()};if('minDays'in patch)row.min_days=patch.minDays;if('days'in patch)row.open_days=patch.days;if('direction'in patch)row.direction=patch.direction;if('goals'in patch)row.goals=patch.goals;if('campusOnly'in patch)row.campus_only=!!patch.campusOnly;if('nets'in patch)row.campus_nets=patch.nets;if('wifi'in patch)row.campus_wifi=patch.wifi;
     if(patch.notice){const t=patch.notice.text||'';row.notice=t;row.notice_at=t?tsNow():null;row.notice_by=t?S.me:null}return upd('settings',row,{id:1})}
   if(col==='m'){const pr={};if('role'in patch)pr.lab_role=patch.role;if('topic'in patch)pr.topic=patch.topic;if('sid'in patch)pr.student_id=String(patch.sid).trim().toUpperCase();if('cls'in patch)pr.class_name=String(patch.cls).trim().toUpperCase();if('full_name'in patch)pr.full_name=patch.full_name;
     if(Object.keys(pr).length)await upd('profiles',pr,{id:u});
@@ -455,6 +456,16 @@ function mtForm(x,date){x=x||{};
   async fd=>{const id=x.id||gid();await D(()=>S.db.doc('mt/'+id).set({...fd,by:x.by||S.me,at:x.at||Date.now()}));toast('Meeting saved.')})}
 
 /* ---------- Attendance ---------- */
+// School Wi-Fi rule: the server decides from the caller's public IP; the browser only shows the status.
+const wifiName=()=>S.cfg.wifi||'school Wi-Fi';
+const offMsg=()=>`Check-in works only on the school Wi-Fi (${wifiName()}). Connect to it, then press Check in again.`;
+async function campusCheck(force){const c=S.campus;if(!force&&c&&Date.now()-c.t<60000)return c;
+  try{const{data,error}=await SB.rpc('campus_status');if(error)throw error;S.campus={...data,t:Date.now()}}catch(e){S.campus={ok:!S.cfg.campusOnly,required:!!S.cfg.campusOnly,ip:'',err:true,t:Date.now()}}
+  return S.campus}
+function campusBar(){if(!S.cfg.campusOnly)return'';const c=S.campus;
+  if(!c||Date.now()-c.t>60000){if(!S.campusP){S.campusP=1;campusCheck(true).finally(()=>{S.campusP=0;if(S.tab==='attendance'||S.tab==='overview')render()})}return `<p class="net">Checking your network…</p>`}
+  return c.ok?`<p class="net ok">You are on the school network (${esc(wifiName())}), so you can check in.</p>`
+    :`<p class="net bad">You are not on the school Wi-Fi. Connect to <b>${esc(wifiName())}</b> to check in. Booking days works from anywhere.${c.ip?` <span class="mute">Your network: ${esc(c.ip)}</span>`:''} <button type="button" class="link" data-act="net-re">Check again</button></p>`}
 function vDD(){
   const ws=S.week,days=[...Array(7)].map((_,i)=>iso(addD(ws,i))),od=openDays(),need=minDays();
   const nav=`<div class="filters"><button class="btn sm" data-act="wk" data-n="-1" aria-label="Previous week">‹</button><h2 style="margin:0 6px">Week ${sh(ws)} to ${sh(addD(ws,6))}</h2><button class="btn sm" data-act="wk" data-n="1" aria-label="Next week">›</button>${iso(ws)!==WK0?'<button class="btn sm" data-act="wk" data-n="0">This week</button>':''}</div>`;
@@ -466,7 +477,7 @@ function vDD(){
   if(!joined())return `<div class="bar-head">${nav}</div>${joinBanner()}`;
   const at=S.m[S.me].att||{},n=wkCount(S.me,ws);
   return `<div class="bar-head">${nav}<span class="badge ${n>=need?'ok':'ac'}">${n}/${need} required lab days</span></div>
-  <p class="mute">Book the days you plan to come in, then press Check in when you arrive. You can only check in for today.</p>
+  <p class="mute">Book the days you plan to come in, then press Check in when you arrive. You can only check in for today.</p>${campusBar()}
   <div class="week">${days.map((d,i)=>{const a=at[d]||{},cl=!od.includes(i),past=d<TODAY,today=d===TODAY;let st,c='';
     if(a.in>0){st='Present '+(a.mk?'(confirmed)':hm(a.in));c='ok'}else if(a.reg&&past){st='Absent';c='bad'}else if(a.reg){st='Booked';c='ac'}else st=cl?'Lab closed':past?'Not in lab':'Not booked';
     let b='';if(!cl&&!past&&!(a.in>0))b+=`<button class="btn sm" data-act="reg" data-d="${d}">${a.reg?'Cancel booking':'Book this day'}</button>`;
@@ -564,8 +575,12 @@ function setForm(){const c=S.cfg,od=openDays();
   const adminBlock=S.admin?`<h3>Members and access</h3><p class="mute">Admins post work, schedule meetings, confirm attendance, read every report and manage accounts. Inactive accounts keep their history but cannot see any lab data.</p><div class="plist">${people.map(p=>`<p><span><b>${esc(p.full_name||'(no name yet)')}</b><br><small class="mute">${esc([p.email,p.student_id,p.class_name,S.contact?.[p.id]].filter(Boolean).join(' · '))}</small></span><span class="filters"><select data-role-u="${esc(p.id)}" aria-label="Access for ${esc(p.full_name||p.email)}" style="width:auto;padding:6px 8px;font-size:14px">${[['member','Member'],['admin','Admin'],['inactive','Inactive']].map(([v,l])=>`<option value="${v}"${p.role===v?' selected':''}>${l}</option>`).join('')}</select>${p.id!==S.me?`<button type="button" class="btn sm" data-act="pw-reset" data-u="${esc(p.id)}">New password</button>`:''}</span></p>`).join('')}</div>
   <h3>Add an account</h3><div class="two"><div><label for="n-email">Email</label><input id="n-email" type="email" autocomplete="off"></div><div><label for="n-name">Full name</label><input id="n-name" autocomplete="off"></div><div><label for="n-sid">Student ID</label><input id="n-sid" autocomplete="off"></div><div><label for="n-cls">Class</label><input id="n-cls" autocomplete="off"></div><div><label for="n-ph">Phone</label><input id="n-ph" type="tel" autocomplete="off"></div><div><label for="n-role">Access</label><select id="n-role"><option value="member">Member</option><option value="admin">Admin</option></select></div></div><div class="acts" style="justify-content:flex-start"><button type="button" class="btn dark" data-act="acc-create">Create with temporary password</button></div><p class="mute" style="font-size:13px">You get a temporary password to pass on yourself (no email is sent). The person must choose their own password at first sign-in.</p>
   <h3>Add many members at once</h3><p class="mute">Paste one person per line: full name, student ID, class, email, phone. Copying rows from Excel or Google Sheets works; the class can be left out.</p><textarea id="bulk-in" rows="6" placeholder="Phạm Minh Huy	GCH250338	CO1501	name@gmail.com	0382269479"></textarea><div class="acts" style="justify-content:flex-start"><button type="button" class="btn" data-act="bulk-check">Check the list</button></div><div id="bulk-out"></div>`:'';
-  modal('Lab settings',`<label for="f-min">Minimum lab days per week</label><input id="f-min" type="number" min="0" max="7" name="minDays" value="${minDays()}"><label>Days the lab is open</label><div class="filters">${DOW.map((d,i)=>`<label class="ck"><input type="checkbox" name="d${i}"${od.includes(i)?' checked':''}> ${d}</label>`).join('')}</div><label for="f-dir">Overall research direction</label><textarea id="f-dir" name="direction" rows="5">${esc(c.direction||'')}</textarea><label for="f-goal">Publication goals (conferences, journals, milestones)</label><textarea id="f-goal" name="goals" rows="3">${esc(c.goals||'')}</textarea>${adminBlock}`,
-  async(fd)=>{const days=[0,1,2,3,4,5,6].filter(i=>fd['d'+i]);await W('cfg/main',{minDays:Math.max(0,Math.min(7,Number(fd.minDays)||0)),days,direction:fd.direction||'',goals:fd.goals||'',at:Date.now()},{});toast('Lab settings saved.')})}
+  modal('Lab settings',`<label for="f-min">Minimum lab days per week</label><input id="f-min" type="number" min="0" max="7" name="minDays" value="${minDays()}"><label>Days the lab is open</label><div class="filters">${DOW.map((d,i)=>`<label class="ck"><input type="checkbox" name="d${i}"${od.includes(i)?' checked':''}> ${d}</label>`).join('')}</div><label for="f-dir">Overall research direction</label><textarea id="f-dir" name="direction" rows="5">${esc(c.direction||'')}</textarea><label for="f-goal">Publication goals (conferences, journals, milestones)</label><textarea id="f-goal" name="goals" rows="3">${esc(c.goals||'')}</textarea>${S.admin?`<h3>Check-in network</h3><label class="ck"><input type="checkbox" id="f-co" name="campusOnly"${c.campusOnly?' checked':''}> Members can check in only on the school Wi-Fi</label><p class="mute" style="font-size:13px;margin:4px 0 0">The lab server compares the member's internet address with the school network list below. Booking days still works from anywhere, and admins can always confirm attendance.</p><label for="f-wifi">Wi-Fi name shown to members</label><input id="f-wifi" name="wifi" value="${esc(c.wifi||'')}"><label for="f-nets">School network addresses (one per line)</label><textarea id="f-nets" name="nets" rows="3" placeholder="Press the button below while connected to the school Wi-Fi">${esc((c.nets||[]).join('\n'))}</textarea><div class="acts" style="justify-content:flex-start"><button type="button" class="btn" data-act="net-add">Add the network I am on now</button></div>`:''}${adminBlock}`,
+  async(fd)=>{const days=[0,1,2,3,4,5,6].filter(i=>fd['d'+i]);const extra={};
+    if(S.admin){const nets=[...new Set(String(fd.nets||'').split(/[\s,;]+/).filter(Boolean))],bad=nets.filter(x=>!isNet(x));if(bad.length){toast('Not a network address: '+bad.join(', '));throw 0}
+      if(fd.campusOnly&&!nets.length){toast('Add at least one school network address, or untick the Wi-Fi rule.');throw 0}Object.assign(extra,{campusOnly:!!fd.campusOnly,nets,wifi:(fd.wifi||'').slice(0,60)});S.campus=null}
+    await W('cfg/main',{minDays:Math.max(0,Math.min(7,Number(fd.minDays)||0)),days,direction:fd.direction||'',goals:fd.goals||'',...extra,at:Date.now()},{});toast('Lab settings saved.')})}
+function isNet(x){const[a,m,...r]=x.split('/');if(r.length)return false;if(/^\d{1,3}(\.\d{1,3}){3}$/.test(a))return a.split('.').every(n=>+n<256)&&(m===undefined||(/^\d+$/.test(m)&&+m<=32));if(/^[0-9a-f:]+$/i.test(a)&&a.includes(':'))return m===undefined||(/^\d+$/.test(m)&&+m<=128);return false}
 
 /* ---------- events ---------- */
 function route(){const h=location.hash.slice(1);S.tab=TABS.some(t=>t[0]===h)?h:'overview';const nx=S.next||{};S.asg=nx.asg||null;S.thread=nx.thread||null;S.member=nx.member||null;S.next=null;render();try{scrollTo(0,0)}catch{}}
@@ -601,7 +616,12 @@ document.addEventListener('click',e=>{
   case'mt-del':ask('Delete this meeting?','It will be removed from the lab calendar.',()=>D(()=>S.db.doc('mt/'+id).delete()));break;
   case'rsvp':busy(el,W('m/'+S.me,{rsvp:{[id]:v}}).then(()=>{closeM();toast(v==='yes'?'Marked as attending.':'Marked as absent.')}));break;
   case'reg':{const cur=!!S.m[S.me]?.att?.[d]?.reg;busy(el,W('m/'+S.me,{att:{[d]:{reg:!cur}}}).then(()=>toast(cur?'Booking cancelled.':'Lab day booked for '+sh(parse(d))+'.')));break}
-  case'in':busy(el,W('m/'+S.me,{att:{[TODAY]:{reg:true,in:Date.now(),mk:false}}}).then(()=>toast('Checked in at '+hm(Date.now())+'.')));break;
+  case'in':busy(el,(async()=>{if(S.cfg.campusOnly&&!S.admin){const c=await campusCheck(true);if(!c.ok){render();toast(offMsg());throw 0}}
+    await wRoute('m/'+S.me,{att:{[TODAY]:{reg:true,in:Date.now(),mk:false}}}).catch(e=>{if(/off_campus/.test(e?.message||'')){S.campus={...(S.campus||{}),ok:false,t:Date.now()};render();toast(offMsg())}else fail(e);throw e});
+    await reload();toast('Checked in at '+hm(Date.now())+'.')})());break;
+  case'net-re':busy(el,campusCheck(true).then(c=>{render();toast(c.ok?'You are on the school network.':'Still not on the school Wi-Fi.')}));break;
+  case'net-add':busy(el,campusCheck(true).then(c=>{const t=$('#f-nets');if(!c.ip){toast('Could not read your network address.');return}
+    const cur=t.value.split(/[\s,]+/).filter(Boolean);if(!cur.includes(c.ip))cur.push(c.ip);t.value=cur.join('\n');$('#f-co').checked=true;toast('Added '+c.ip+'. Press Save to apply.')}));break;
   case'unin':busy(el,W('m/'+S.me,{att:{[d]:{in:0}}}));break;
   case'mark':{const a=S.m[u]?.att?.[d]||{};busy(el,W('m/'+u,{att:{[d]:a.in>0?{in:0,mk:false}:{in:Date.now(),mk:true}}}));break}
   case'rep':{const x={done:val('rp-d'),next:val('rp-n'),issue:val('rp-i'),pct:clamp(val('rp-p')),link:val('rp-l'),at:Date.now()};if(!x.done&&!x.next){toast('Fill in at least what you did or your plan.');break}busy(el,W('r/'+S.me,{reps:{[WK0]:x}},RBASE).then(()=>toast('Weekly report sent.')));break}
@@ -680,7 +700,7 @@ async function fetchAll(){const since=iso(addD(new Date(),-200));const T={profil
 const ms=t=>t?Date.parse(t)||0:0;
 function build(D){S.prof={};S.names={};for(const p of D.profiles){S.prof[p.id]=p;S.names[p.id]=p.full_name||p.email||'Member'}
   const me=S.prof[S.me]||{};S.admin=S.owner=me.role==='admin';
-  const st=D.settings[0]||{};S.cfg={minDays:st.min_days??1,days:Array.isArray(st.open_days)?st.open_days:[0,1,2,3,4,5],direction:st.direction||'',goals:st.goals||'',notice:st.notice?{text:st.notice,at:ms(st.notice_at),by:st.notice_by}:null};
+  const st=D.settings[0]||{};S.cfg={minDays:st.min_days??1,days:Array.isArray(st.open_days)?st.open_days:[0,1,2,3,4,5],direction:st.direction||'',goals:st.goals||'',campusOnly:!!st.campus_only,nets:Array.isArray(st.campus_nets)?st.campus_nets:[],wifi:st.campus_wifi||'Gre_Guest',notice:st.notice?{text:st.notice,at:ms(st.notice_at),by:st.notice_by}:null};
   S.contact={};for(const c of D.contacts||[])S.contact[c.user_id]=c.phone;
   S.m={};for(const p of D.profiles)if(p.role==='member')S.m[p.id]={role:p.lab_role,topic:p.topic,sid:p.student_id,cls:p.class_name||'',joined:ms(p.created_at),att:{},rsvp:{}};
   for(const a of D.attendance)if(S.m[a.user_id])S.m[a.user_id].att[a.day]={reg:!!a.booked,in:ms(a.checked_in_at),mk:!!a.confirmed_by};
