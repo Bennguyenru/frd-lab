@@ -87,7 +87,8 @@ Deno.serve(async (req) => {
     if (action === "reset_password") {
       const id = String(body.user_id ?? "");
       const password = tempPassword();
-      const { error } = await admin.auth.admin.updateUserById(id, { password });
+      // email_confirm: people first invited by email who never clicked the link could not sign in.
+      const { error } = await admin.auth.admin.updateUserById(id, { password, email_confirm: true });
       if (error) return json({ error: error.message }, 400);
       await admin.from("profiles").update({ must_change_password: true }).eq("id", id);
       return json({ ok: true, password });
