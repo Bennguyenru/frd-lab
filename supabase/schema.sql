@@ -357,6 +357,30 @@ $$;
 revoke execute on function public.campus_status() from public, anon;
 grant execute on function public.campus_status() to authenticated;
 
+-- Check-ins refused because of the network. A school can use several public addresses (load-balanced lines),
+-- so admins see which addresses lab members were blocked from and can allow them in one click.
+create table if not exists public.campus_misses (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  ip inet not null,
+  day date not null default public.local_today(),
+  tries int not null default 1,
+  last_at timestamptz not null default now(),
+  primary key (user_id, ip, day)
+);
+alter table public.campus_misses enable row level security;
+revoke insert, update on public.campus_misses from anon, authenticated;   -- written only by note_campus_miss()
+
+create or replace function public.note_campus_miss() returns void
+language plpgsql security definer set search_path = public as $$
+declare v_ip inet := public.client_ip();
+begin
+  if v_ip is null or not public.is_active() or public.on_campus() then return; end if;
+  insert into public.campus_misses (user_id, ip) values (auth.uid(), v_ip)
+  on conflict (user_id, ip, day) do update set tries = public.campus_misses.tries + 1, last_at = now();
+end $$;
+revoke execute on function public.note_campus_miss() from public, anon;
+grant execute on function public.note_campus_miss() to authenticated;
+
 -- Check-in time always comes from the server clock, members only check in for today,
 -- and only managers can confirm attendance or change past days.
 create or replace function public.guard_attendance() returns trigger
@@ -462,7 +486,7 @@ begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
     and tablename in ('profiles','settings','assignments','meetings','rsvps','attendance','topics','comments',
                       'library','papers','reports','report_feedback','submissions','grades','directions','contacts',
-                      'admin_audit','temp_passwords')
+                      'admin_audit','temp_passwords','campus_misses')
   loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
@@ -552,6 +576,8 @@ create policy contacts_update on public.contacts for update to authenticated
 create policy contacts_delete on public.contacts for delete to authenticated using (public.is_admin());
 
 create policy admin_audit_read on public.admin_audit for select to authenticated using (public.is_admin());
+create policy campus_misses_read on public.campus_misses for select to authenticated using (public.is_admin());
+create policy campus_misses_delete on public.campus_misses for delete to authenticated using (public.is_admin());
 
 -- manager feedback: members read their own, only managers write
 do $$
