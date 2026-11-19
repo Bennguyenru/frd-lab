@@ -11,6 +11,7 @@ Live site: https://bennguyenru.github.io/frd-lab/
 |---|---|---|
 | Dashboard | Streak, XP, achievements, own work and activity | Lab overview, member progress, publication pipeline, announcement |
 | Classroom | Read posts, submit work, see grades | Post assignments, discussions and materials; grade with feedback |
+| Projects | Boards they belong to: add, edit and drag tasks, tick sub-tasks, see the timeline; create their own project | Every project; turn a classroom assignment into a project with one main task per member; manage members and lists |
 | Meetings | Calendar, reply attending or absent | Schedule, edit and delete meetings |
 | Attendance | Book lab days, check in for today (optionally only on the school Wi-Fi) | Weekly register, confirm attendance, export CSV |
 | Discussion | Open topics, reply | Moderate |
@@ -25,7 +26,7 @@ Live site: https://bennguyenru.github.io/frd-lab/
 * Accounts, data and access rules live in **Supabase** (project `aafopsdcikxsakyiscjn`).
   Every rule is enforced inside the database with row level security, so the browser code being public is not a risk:
   members can only read and write what the rules allow (for example, they cannot read other members' reports or change their own grades).
-* `supabase/schema.sql` creates the tables, rules and triggers. It is safe to run again after an update.
+* `supabase/schema.sql` creates the tables, rules and triggers. `supabase/projects.sql` adds the project boards (run it after schema.sql). Both are safe to run again after an update.
 * `supabase/functions/admin-users` is an Edge Function that lets admins create accounts, send invites and reset passwords from the site, without exposing the secret key.
 * `vendor/supabase.js` is supabase-js 2.119.0 (MIT licence, see `vendor/LICENSE-supabase-js.txt`).
 
@@ -38,6 +39,16 @@ Public sign-up is switched off. Admins add people from **Settings → Add an acc
 * **Forgotten passwords**: an admin presses **New password** next to the person in Settings and passes the new temporary password on. No email is sent (the built-in Supabase mailer only reaches project team addresses and a few messages per hour).
 
 Phone numbers are stored in a separate `contacts` table that only the member and the admins can read. Student ID and class are visible to the lab.
+
+## Projects
+
+Projects work like Trello boards. Each project has lists (To do, In progress, Review, Done by default), cards for main tasks, and sub-tasks inside each card.
+
+* **Two ways to start**: in Classroom, open an assignment and press **Create project** to tick members and give each one their own main task; or press **New project** on the Projects page.
+* **Board**: drag cards between lists, or open a card and change its list. Cards in a list marked "counts as done" are finished.
+* **Timeline**: a Gantt chart from each task's start date to its due date, with sub-tasks under their main task, a today line and day or week zoom.
+* **Task list**: every task and sub-task in one table, with a filter for your own tasks and CSV export.
+* **Who can do what** (enforced in the database): admins see every project; members see only projects they belong to. The person who creates a project leads it. Leads and admins manage people and delete lists; every project member adds, edits and moves tasks; a task can be deleted by its author, a lead or an admin. Only project members can be assigned.
 
 ## Check-in only on the school Wi-Fi
 
