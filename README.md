@@ -59,7 +59,7 @@ Projects work like Trello boards. Each project has lists (To do, In progress, Re
 A browser cannot read the Wi-Fi name, so the rule works on the school's public internet address instead.
 In **Settings → Check-in network**, an admin who is connected to the school Wi-Fi presses **Add the network I am on now**, ticks the rule and saves.
 From then on the database (`guard_attendance`, `on_campus()`) refuses a member's check-in unless the request comes from a listed address. The address is read from the `cf-connecting-ip` header that Cloudflare sets in front of Supabase, which a member cannot change.
-Booking days still works from anywhere and admins can always confirm attendance. If the school changes its internet line, a member on the Wi-Fi sees their address on the Attendance page; add it to the list.
+Booking days still works from anywhere and admins can always confirm attendance. The school Wi-Fi goes out through **several public addresses** (four were seen in November 2026: 123.24.206.19, 123.24.205.138, 123.24.206.55, 222.252.96.153), so list all of them. When a member is blocked, the address is recorded and appears under **Blocked check-ins** in Settings: if several members were blocked from the same address on lab days, press **Allow**, then Save.
 
 Every account created, temporary password issued and access change is written to an **Account activity** log (Settings, admins only). Nobody can edit or delete it from the site.
 
