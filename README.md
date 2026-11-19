@@ -35,7 +35,8 @@ Live site: https://bennguyenru.github.io/frd-lab/
 Public sign-up is switched off. Admins add people from **Settings → Add an account**:
 
 * **Add many members at once**: paste rows (full name, student ID, class, email, phone) copied from Excel or Google Sheets, check the list, then create all accounts. The site shows each temporary password once, with Copy and Download CSV.
-* **Create with temporary password**: the site shows a one-time password to pass on. The person must choose their own at first sign-in. No email is needed.
+* **Create with temporary password**: the site shows a one-time password (for example `Lab-7k2m-9qxp-4hwe`) to pass on. The person must choose their own at first sign-in. No email is needed.
+* **Temporary passwords are enforced by the database**: until the person chooses their own password, the account can read and change nothing in the lab (not even an admin account). A temporary password stops working for the lab after 72 hours; issue a new one with **New password**.
 * **Forgotten passwords**: an admin presses **New password** next to the person in Settings and passes the new temporary password on. No email is sent (the built-in Supabase mailer only reaches project team addresses and a few messages per hour).
 
 Phone numbers are stored in a separate `contacts` table that only the member and the admins can read. Student ID and class are visible to the lab.
@@ -56,6 +57,14 @@ A browser cannot read the Wi-Fi name, so the rule works on the school's public i
 In **Settings → Check-in network**, an admin who is connected to the school Wi-Fi presses **Add the network I am on now**, ticks the rule and saves.
 From then on the database (`guard_attendance`, `on_campus()`) refuses a member's check-in unless the request comes from a listed address. The address is read from the `cf-connecting-ip` header that Cloudflare sets in front of Supabase, which a member cannot change.
 Booking days still works from anywhere and admins can always confirm attendance. If the school changes its internet line, a member on the Wi-Fi sees their address on the Attendance page; add it to the list.
+
+Every account created, temporary password issued and access change is written to an **Account activity** log (Settings, admins only). Nobody can edit or delete it from the site.
+
+## Security notes
+
+* `index.html` sets a Content-Security-Policy: scripts only from this site, network only to the Supabase project, Crossref and Unpaywall. **If you move to another Supabase project, update the project URL in that policy as well as in `config.js`.**
+* CSV exports put an apostrophe in front of any cell that starts with `=`, `+`, `-` or `@`, so text typed by members cannot run as a spreadsheet formula.
+* Graded work is locked: a member cannot change a submission after it has a grade (delete the grade to reopen it). Deactivated accounts cannot change anything.
 
 To make someone admin from the Supabase SQL editor: `select make_admin('name@example.com');`
 

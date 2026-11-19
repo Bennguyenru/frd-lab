@@ -22,12 +22,12 @@ alter table public.profiles add column if not exists class_name text not null de
 
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin' and not must_change_password)
 $$;
 
 create or replace function public.is_active() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.profiles where id = auth.uid() and role in ('admin','member'))
+  select exists (select 1 from public.profiles where id = auth.uid() and role in ('admin','member') and not must_change_password)
 $$;
 
 create or replace function public.local_today() returns date
@@ -47,14 +47,50 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Temporary passwords: the server remembers which password hash it handed out and when.
+-- A person with a temporary password can do nothing in the lab (is_active() is false) until they
+-- choose their own password, and the temporary one stops counting after 72 hours.
+create table if not exists public.temp_passwords (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  pw_hash text,
+  issued_at timestamptz not null default now()
+);
+alter table public.temp_passwords enable row level security;   -- no policies: only server functions read it
+revoke all on public.temp_passwords from anon, authenticated;
+
+create or replace function public.track_temp_password() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.must_change_password then
+    if auth.uid() is null then                               -- set by the Edge Function or the SQL editor
+      insert into public.temp_passwords (user_id, pw_hash, issued_at)
+      select new.id, u.encrypted_password, now() from auth.users u where u.id = new.id
+      on conflict (user_id) do update set pw_hash = excluded.pw_hash, issued_at = excluded.issued_at;
+    end if;
+  else
+    delete from public.temp_passwords where user_id = new.id;
+  end if;
+  return null;
+end $$;
+
 -- Members may edit their own name, student ID, lab role and topic, never their access role.
 create or replace function public.protect_profile() returns trigger
 language plpgsql security definer set search_path = public as $$
+declare h text; t timestamptz;
 begin
   if auth.uid() is null then return new; end if;            -- SQL editor or server function
   if not public.is_admin() then
     new.role := old.role;
     new.email := old.email;
+    if new.must_change_password and not old.must_change_password then
+      new.must_change_password := false;                     -- only admins hand out temporary passwords
+    elsif old.must_change_password and not new.must_change_password then
+      select pw_hash, issued_at into h, t from public.temp_passwords where user_id = old.id;
+      if t is null or t < now() - interval '72 hours' then raise exception 'temp_expired'; end if;
+      if (select encrypted_password from auth.users where id = old.id) is not distinct from h then
+        raise exception 'pw_unchanged';
+      end if;
+    end if;
   elsif old.role = 'admin' and new.role <> 'admin'
         and (select count(*) from public.profiles where role = 'admin') <= 1 then
     raise exception 'The lab needs at least one admin. Make someone else admin first.';
@@ -67,6 +103,41 @@ end $$;
 drop trigger if exists protect_profile on public.profiles;
 create trigger protect_profile before update on public.profiles
   for each row execute function public.protect_profile();
+drop trigger if exists track_temp_password on public.profiles;
+create trigger track_temp_password after insert or update of must_change_password on public.profiles
+  for each row execute function public.track_temp_password();
+
+-- People who were already waiting to change a temporary password get 72 hours from this update.
+insert into public.temp_passwords (user_id, pw_hash, issued_at)
+select p.id, u.encrypted_password, now()
+from public.profiles p join auth.users u on u.id = p.id
+where p.must_change_password
+on conflict (user_id) do nothing;
+
+-- Admin account actions (accounts created, passwords reset, roles changed). Admins read it; only the server writes.
+create table if not exists public.admin_audit (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  actor uuid references public.profiles(id) on delete set null,
+  action text not null,
+  target uuid references public.profiles(id) on delete set null,
+  detail text not null default ''
+);
+alter table public.admin_audit enable row level security;
+revoke insert, update, delete on public.admin_audit from anon, authenticated;
+
+create or replace function public.audit_role_change() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.role is distinct from old.role then
+    insert into public.admin_audit (actor, action, target, detail)
+    values (auth.uid(), 'role_change', new.id, old.role || ' -> ' || new.role);
+  end if;
+  return null;
+end $$;
+drop trigger if exists audit_role_change on public.profiles;
+create trigger audit_role_change after update of role on public.profiles
+  for each row execute function public.audit_role_change();
 
 -- Run in the SQL editor to make an existing account an admin:  select make_admin('name@example.com');
 create or replace function public.make_admin(user_email text) returns text
@@ -245,8 +316,10 @@ create table if not exists public.directions (
 -- ------------------------------------------------------------------
 -- Server-side guards
 -- ------------------------------------------------------------------
--- The caller's public IP. Supabase sits behind Cloudflare, which sets cf-connecting-ip
--- itself; a browser or script cannot replace it.
+-- The caller's public IP. Supabase sits behind Cloudflare, which sets cf-connecting-ip itself.
+-- Checked on 2026-11-19: a request that carries its own CF-Connecting-IP header is refused by
+-- Cloudflare (403, error 1000), while x-forwarded-for keeps any value the client sends, so only
+-- cf-connecting-ip is trusted here.
 create or replace function public.client_ip() returns inet
 language plpgsql stable set search_path = public as $$
 declare h json; v text;
@@ -353,7 +426,13 @@ begin
     new.user_id := auth.uid();
   end if;
   if tg_table_name = 'reports' then new.updated_at := now(); end if;
-  if tg_table_name = 'submissions' then new.submitted_at := now(); end if;
+  if tg_table_name = 'submissions' then
+    if not public.is_admin() and exists (select 1 from public.grades g
+        where g.assignment_id = new.assignment_id and g.user_id = new.user_id) then
+      raise exception 'graded_locked';
+    end if;
+    new.submitted_at := now();
+  end if;
   if tg_table_name = 'grades' then new.graded_by := auth.uid(); new.graded_at := now(); end if;
   if tg_table_name in ('report_feedback') then new.created_by := auth.uid(); new.updated_at := now(); end if;
   if tg_table_name = 'directions' then new.updated_by := auth.uid(); new.updated_at := now(); end if;
@@ -382,7 +461,8 @@ declare r record;
 begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
     and tablename in ('profiles','settings','assignments','meetings','rsvps','attendance','topics','comments',
-                      'library','papers','reports','report_feedback','submissions','grades','directions','contacts')
+                      'library','papers','reports','report_feedback','submissions','grades','directions','contacts',
+                      'admin_audit','temp_passwords')
   loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
@@ -428,8 +508,9 @@ create policy meetings_delete on public.meetings for delete to authenticated usi
 -- rsvps and attendance: everyone active reads; members write their own rows, managers any
 create policy rsvps_read on public.rsvps for select to authenticated using (public.is_active());
 create policy rsvps_insert on public.rsvps for insert to authenticated with check (public.is_active() and user_id = auth.uid());
-create policy rsvps_update on public.rsvps for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy rsvps_delete on public.rsvps for delete to authenticated using (user_id = auth.uid() or public.is_admin());
+create policy rsvps_update on public.rsvps for update to authenticated
+  using (public.is_active() and user_id = auth.uid()) with check (public.is_active() and user_id = auth.uid());
+create policy rsvps_delete on public.rsvps for delete to authenticated using ((public.is_active() and user_id = auth.uid()) or public.is_admin());
 
 create policy attendance_read on public.attendance for select to authenticated using (public.is_active());
 create policy attendance_insert on public.attendance for insert to authenticated
@@ -454,18 +535,23 @@ end $$;
 -- private work: each member sees and writes their own; managers see everything
 create policy reports_read on public.reports for select to authenticated using (user_id = auth.uid() or public.is_admin());
 create policy reports_insert on public.reports for insert to authenticated with check (public.is_active() and user_id = auth.uid());
-create policy reports_update on public.reports for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy reports_update on public.reports for update to authenticated
+  using (public.is_active() and user_id = auth.uid()) with check (public.is_active() and user_id = auth.uid());
 
 create policy submissions_read on public.submissions for select to authenticated using (user_id = auth.uid() or public.is_admin());
 create policy submissions_insert on public.submissions for insert to authenticated with check (public.is_active() and user_id = auth.uid());
-create policy submissions_update on public.submissions for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy submissions_update on public.submissions for update to authenticated
+  using (public.is_active() and user_id = auth.uid()) with check (public.is_active() and user_id = auth.uid());
 
 create policy contacts_read on public.contacts for select to authenticated using (user_id = auth.uid() or public.is_admin());
 create policy contacts_insert on public.contacts for insert to authenticated
   with check ((public.is_active() and user_id = auth.uid()) or public.is_admin());
 create policy contacts_update on public.contacts for update to authenticated
-  using (user_id = auth.uid() or public.is_admin()) with check (user_id = auth.uid() or public.is_admin());
+  using ((public.is_active() and user_id = auth.uid()) or public.is_admin())
+  with check ((public.is_active() and user_id = auth.uid()) or public.is_admin());
 create policy contacts_delete on public.contacts for delete to authenticated using (public.is_admin());
+
+create policy admin_audit_read on public.admin_audit for select to authenticated using (public.is_admin());
 
 -- manager feedback: members read their own, only managers write
 do $$

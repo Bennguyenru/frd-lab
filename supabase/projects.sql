@@ -80,6 +80,15 @@ begin
   if new.start_date is not null and new.due_date is not null and new.due_date < new.start_date then
     raise exception 'The end date cannot be before the start date.';
   end if;
+  if (new.start_date is not null and new.start_date not between date '2000-01-01' and date '2100-12-31')
+     or (new.due_date is not null and new.due_date not between date '2000-01-01' and date '2100-12-31') then
+    raise exception 'Use dates between the years 2000 and 2100.';
+  end if;
+  -- Only admins link a project to a classroom assignment.
+  if auth.uid() is not null and not public.is_admin() and new.assignment_id is not null
+     and (tg_op = 'INSERT' or new.assignment_id is distinct from old.assignment_id) then
+    raise exception 'Only admins can link a project to a classroom assignment.';
+  end if;
   return new;
 end $$;
 drop trigger if exists guard_project on public.projects;
@@ -111,6 +120,34 @@ drop trigger if exists guard_project_list on public.project_lists;
 create trigger guard_project_list before insert or update on public.project_lists
   for each row execute function public.guard_project_list();
 
+-- Marking a list as "done" (or not) updates the cards already in it.
+create or replace function public.sync_list_done() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.is_done is distinct from old.is_done then
+    update public.project_tasks set done = new.is_done
+    where list_id = new.id and parent_id is null and done is distinct from new.is_done;
+  end if;
+  return null;
+end $$;
+drop trigger if exists sync_list_done on public.project_lists;
+create trigger sync_list_done after update of is_done on public.project_lists
+  for each row execute function public.sync_list_done();
+
+-- Only active lab accounts can join a project.
+create or replace function public.guard_project_member() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'UPDATE' then new.project_id := old.project_id; new.user_id := old.user_id; end if;
+  if not exists (select 1 from public.profiles where id = new.user_id and role <> 'inactive') then
+    raise exception 'Only active lab members can join a project.';
+  end if;
+  return new;
+end $$;
+drop trigger if exists guard_project_member on public.project_members;
+create trigger guard_project_member before insert or update on public.project_members
+  for each row execute function public.guard_project_member();
+
 create or replace function public.guard_project_task() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare lp text; ldone boolean; pp text; ppar text; outsiders int;
@@ -131,6 +168,9 @@ begin
     if pp is distinct from new.project_id then raise exception 'The main task belongs to another project.'; end if;
     if ppar is not null then raise exception 'A sub-task cannot have its own sub-tasks.'; end if;
     if new.parent_id = new.id then raise exception 'A task cannot be its own sub-task.'; end if;
+    if tg_op = 'UPDATE' and exists (select 1 from public.project_tasks c where c.parent_id = new.id) then
+      raise exception 'A task that has sub-tasks cannot become a sub-task.';
+    end if;
     new.list_id := null;
   end if;
 
@@ -146,6 +186,10 @@ begin
 
   if new.start_date is not null and new.due_date is not null and new.due_date < new.start_date then
     raise exception 'The due date cannot be before the start date.';
+  end if;
+  if (new.start_date is not null and new.start_date not between date '2000-01-01' and date '2100-12-31')
+     or (new.due_date is not null and new.due_date not between date '2000-01-01' and date '2100-12-31') then
+    raise exception 'Use dates between the years 2000 and 2100.';
   end if;
 
   select count(*) into outsiders from unnest(new.assignees) a
