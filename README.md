@@ -29,6 +29,9 @@ Live site: https://bennguyenru.github.io/frd-lab/
 * `supabase/schema.sql` creates the tables, rules and triggers. `supabase/projects.sql` adds the project boards (run it after schema.sql). Both are safe to run again after an update.
 * `supabase/functions/admin-users` is an Edge Function that lets admins create accounts, send invites and reset passwords from the site, without exposing the secret key.
 * `vendor/supabase.js` is supabase-js 2.119.0 (MIT licence, see `vendor/LICENSE-supabase-js.txt`).
+* `app.js` holds the application code and `stack.js` the small-screen table labels; `index.html` holds the markup and styles.
+* `fonts/` holds the Inter typeface (SIL Open Font License, see `fonts/LICENSE-Inter-OFL.txt`), served from this site so no third-party font service sees visitors.
+* `DESIGN.md` documents the design tokens and components. Read it before changing the look.
 
 ## Accounts
 
