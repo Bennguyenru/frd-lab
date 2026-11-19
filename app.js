@@ -193,9 +193,14 @@ const first=n=>(n||'').trim().split(/\s+/).pop()||'';
 function vNotice(){const n=S.cfg.notice;const has=n&&n.text;
   if(!has&&!T())return'';
   return `<section class="card" style="border-left:5px solid var(--b)"><div class="bar-head"><h2>${ic('msg',18)} Announcement</h2>${T()?`<button class="btn sm" data-act="notice">${has?'Edit':'Post announcement'}</button>`:''}</div>${has?`<p class="pre">${esc(n.text)}</p><small class="mute">${n.by?esc(nm(n.by))+', ':''}${fmtTs(n.at)}</small>`:'<p class="mute">No announcement. Post one to show it at the top of everyone\'s dashboard.</p>'}</section>`}
+function heroAct(){const t=S.m[S.me]?.att?.[TODAY]||{},open=openDays().includes((new Date().getDay()+6)%7);
+  if(!joined())return `<button class="hbtn" data-act="profile">${ic('users',18)}Complete my profile</button>`;
+  if(t.in>0)return `<a class="hdone" href="#attendance">${ic('check',18)}Checked in at ${hm(t.in)}</a>`;
+  if(!open)return `<span class="hdone">${ic('clock',18)}The lab is closed today</span>`;
+  return `<button class="hbtn" data-act="in">${ic('check',18)}Check in now</button>`}
 function quickActs(){  const today=S.m[S.me]?.att?.[TODAY]||{};
   const q=T()?[['pri','asg-new','plus','Post new work'],['','mt-new','cal','Schedule meeting'],['','#attendance','check','Mark attendance'],['','#progress','trend','Review progress']]
-    :[['pri',!joined()?'profile':today.in>0?'#attendance':'in','check',!joined()?'Join the lab':today.in>0?'Checked in '+hm(today.in):'Check in now'],['','#discussion','msg','Join discussion'],['','#progress','trend','Weekly report'],['','#meetings','cal','Meetings']];
+    :[['','#projects','kanban','My projects'],['','#progress','trend','Weekly report'],['','#discussion','msg','Join discussion'],['','#meetings','cal','Meetings']];
   return `<nav class="qas" aria-label="Quick actions">${q.map(([c,a,i,l])=>a[0]==='#'?`<a class="qa ${c}" href="${a}">${ic(i)}<span>${esc(l)}</span></a>`:`<button class="qa ${c}" data-act="${a}">${ic(i)}<span>${esc(l)}</span></button>`).join('')}</nav>`;
 }
 function vTong(){
@@ -210,7 +215,7 @@ function vTong(){
   }else{
     const g=stats(S.me),bt=S.a.filter(a=>kindOf(a)==='bt'),done=bt.filter(a=>S.r[S.me]?.subs?.[a.id]).length,lp=lastPct(S.me);
     h+=joinBanner();
-    h+=`<section class="hero"><div><h2>Welcome back${nmMe?', '+esc(nmMe):''}!</h2><p>${g.st?`You're on a ${g.st}-day lab streak. Keep it going.`:'Check in when you reach the lab to start a streak.'}</p><div class="hchips"><span class="hchip">Level ${g.lvl}</span><span class="hchip">${g.xp} XP</span>${joined()?`<span class="hchip">${esc(S.m[S.me].role||'Member')}</span>`:''}</div></div><div class="strk">${ic('flame',40)}<div><b>${g.st}</b><span>Day streak</span></div></div></section>
+    h+=`<section class="hero"><div><h2>Welcome back${nmMe?', '+esc(nmMe):''}!</h2><p>${g.st?`You're on a ${g.st}-day lab streak. Keep it going.`:'Check in when you reach the lab to start a streak.'}</p><div class="hchips"><span class="hchip">Level ${g.lvl}</span><span class="hchip">${g.xp} XP</span>${joined()?`<span class="hchip">${esc(S.m[S.me].role||'Member')}</span>`:''}</div>${heroAct()}</div><div class="strk">${ic('flame',40)}<div><b>${g.st}</b><span>Day streak</span></div></div></section>
     ${vNotice()}<div class="stats">${stat('g','check',wkCount(S.me,W0)+'/'+minDays(),'Lab days this week')}${stat('b','book',done+'/'+bt.length,'Assignments submitted')}${stat('y','trophy',g.got,'Achievements')}${stat('p','trend',(lp??0)+'%','Project progress')}</div>${quickActs()}`;
     const work=S.a.filter(a=>kindOf(a)!=='tlieu').sort((x,y)=>dueTs(x)-dueTs(y)||(y.at||0)-(x.at||0)).slice(0,4);
     h+=`<div class="main2"><div>${vMyTasks(4)}<section class="card"><div class="bar-head"><h2>Your learning</h2><a class="link" href="#classroom">View all ${ic('arrow',16)}</a></div><div class="bar-head" style="margin:0 0 4px"><b style="color:var(--ink)">Overall project progress</b><span class="mute">${lp??0}%</span></div><div class="bar"><i style="width:${lp??0}%"></i></div>
@@ -322,7 +327,7 @@ function vDD(){
     if(a.in>0){st='Present '+(a.mk?'(confirmed)':hm(a.in));c='ok'}else if(a.reg&&past){st='Absent';c='bad'}else if(a.reg){st='Booked';c='ac'}else st=cl?'Lab closed':past?'Not in lab':'Not booked';
     let b='';if(!cl&&!past&&!(a.in>0))b+=`<button class="btn sm" data-act="reg" data-d="${d}">${a.reg?'Cancel booking':'Book this day'}</button>`;
     if(today&&!cl)b+=a.in>0?(a.mk?'':`<button class="btn sm" data-act="unin" data-d="${d}">Undo check-in</button>`):'<button class="btn sm pri" data-act="in">Check in</button>';
-    return `<div class="day${cl?' closed':''}${today?' today':''}"><div><b>${DOW[i]}</b> <span class="mute">${sh(parse(d))}${today?', today':''}</span></div><span class="badge ${c}">${st}</span>${b}</div>`}).join('')}</div>`}
+    return `<div class="day${cl?' closed':''}${today?' today':''}"><div><b>${today?'Today':DOW[i]}</b> <span class="mute">${sh(parse(d))}</span></div><span class="badge ${c}">${st}</span>${b}</div>`}).join('')}</div>`}
 
 /* ---------- Progress ---------- */
 function repCard(u,k,x,tc){const fb=S.r[u]?.fb?.[k],ws=parse(k),id=esc(u+'-'+k);
@@ -445,7 +450,7 @@ const nextPos=(p,lid)=>Math.max(0,...mainT(p).filter(t=>(listOf(p,t)||{}).id===l
 function myOpenTasks(){const out=[];for(const p of Object.values(S.pj||{}))if(!p.archived)for(const t of p.tasks)if(!t.done&&(t.assignees||[]).includes(S.me))out.push([p,t]);
   return out.sort((a,b)=>(a[1].due_date||'9999').localeCompare(b[1].due_date||'9999'))}
 function taskRow([p,t]){const par=t.parent_id?p.tasks.find(x=>x.id===t.parent_id):null;
-  return `<div class="prow"><span class="pi ${late(t)?'r':'b'}">${ic(late(t)?'clock':'kanban')}</span><div><b>${esc(t.title)}</b><small>${esc(p.title)}${par?', part of '+esc(par.title):''}</small></div><div class="filters">${dueBadge(t)}<button class="btn sm" data-act="tk" data-p="${esc(p.id)}" data-id="${esc(t.id)}">Open</button></div></div>`}
+  return `<div class="prow"><span class="pi ${late(t)?'r':'b'}">${ic(late(t)?'clock':'kanban')}</span><div><b class="clamp2" title="${esc(t.title)}">${esc(t.title)}</b><small class="clamp1">${esc(p.title)}${par?', part of '+esc(par.title):''}</small></div><div class="filters">${dueBadge(t)}<button class="btn sm" data-act="tk" data-p="${esc(p.id)}" data-id="${esc(t.id)}">Open</button></div></div>`}
 function vMyTasks(max){const ts=myOpenTasks();if(!ts.length)return'';
   return `<section class="card"><div class="bar-head"><h2>My project tasks <span class="mute" style="font-weight:400">${ts.length}</span></h2><a class="link" href="#projects">All projects ${ic('arrow',16)}</a></div>${ts.slice(0,max).map(taskRow).join('')}</section>`}
 
@@ -458,7 +463,7 @@ function vProj(){
   h+=f==='arch'?'':vMyTasks(6);
   if(!list.length)return h+`<section class="card"><p class="mute">${f==='arch'?'No archived projects.':S.admin?'No projects yet. Create one here, or open an assignment in Classroom and press "Create project" to give each member their own task.':'You are not in any project yet. Create your own, or wait for the lab head to add you to one.'}</p></section>`;
   return h+`<div class="pgrid">${list.map(p=>{const m=mainT(p),pr=pProg(p),lt=p.tasks.filter(late).length,a=p.assignment_id?S.a.find(x=>x.id===p.assignment_id):null;
-    return `<button class="pcard" data-act="pj" data-id="${esc(p.id)}"><span class="filters">${a?`<span class="badge ac">From classroom</span>`:''}${p.archived?'<span class="badge">Archived</span>':''}${lt?`<span class="badge bad">${lt} late</span>`:''}</span><b>${esc(p.title)}</b>${p.description?`<span class="mute pdesc">${esc(p.description)}</span>`:''}<span class="mute note">${esc(pDates(p))}, ${pl(m.length,'task')}</span><span class="pct"><span class="bar"><i style="width:${pr}%"></i></span><span>${pr}%</span></span>${avs(pMembers(p))}</button>`}).join('')}</div>`}
+    return `<button class="pcard" data-act="pj" data-id="${esc(p.id)}" title="${esc(p.title)}"><span class="filters">${a?`<span class="badge ac">From classroom</span>`:''}${p.archived?'<span class="badge">Archived</span>':''}${lt?`<span class="badge bad">${lt} late</span>`:''}</span><b>${esc(p.title)}</b>${p.description?`<span class="mute pdesc">${esc(p.description)}</span>`:''}<span class="mute note">${esc(pDates(p))}, ${pl(m.length,'task')}</span><span class="pct"><span class="bar"><i style="width:${pr}%"></i></span><span>${pr}%</span></span>${avs(pMembers(p))}</button>`}).join('')}</div>`}
 
 function vProjOne(p){const ed=canEditP(p),man=canManP(p),v=S.pv||'board',pr=pProg(p),a=p.assignment_id?S.a.find(x=>x.id===p.assignment_id):null;
   let h=`<button class="link" data-act="pj-back">‹ All projects</button><section class="card"><div class="bar-head"><div><h2 style="margin:0">${esc(p.title)}</h2><p class="mute" style="margin:4px 0 0">${esc(pDates(p))}${a?`. From classroom: <button class="link sm" data-act="asg" data-id="${esc(a.id)}">${esc(a.title)}</button>`:''}${p.archived?'. Archived':''}</p></div>
@@ -476,7 +481,7 @@ function vBoard(p){const ed=canEditP(p),man=canManP(p),m=mainT(p);
   return `<div class="kb">${cols}${ed?`<section class="kcol kcol-add"><label for="nl-${esc(p.id)}">Add a list</label><div class="kadd"><input id="nl-${esc(p.id)}" data-nl="${esc(p.id)}" placeholder="List name, e.g. Blocked"><button class="btn sm" data-act="ls-add" data-p="${esc(p.id)}">Add</button></div></section>`:''}</div>
   ${ed?'<p class="mute note">Drag a card to another list, or open it and change the list. Cards in a list marked done count as finished.</p>':''}`}
 function kCard(p,t,ed){const ss=subsOf(p,t.id),sd=ss.filter(x=>x.done).length;
-  return `<article class="kc${t.done?' done':''}${t.priority==='high'?' hi':''}" ${ed?'data-drag="1"':''} role="button" tabindex="0" data-act="tk" data-p="${esc(p.id)}" data-id="${esc(t.id)}" aria-label="${esc(t.title)}"><b>${esc(t.title)}</b>
+  return `<article class="kc${t.done?' done':''}${t.priority==='high'?' hi':''}" ${ed?'data-drag="1"':''} role="button" tabindex="0" data-act="tk" data-p="${esc(p.id)}" data-id="${esc(t.id)}" aria-label="${esc(t.title)}" title="${esc(t.title)}"><b>${esc(t.title)}</b>
     <div class="kmeta"><span class="filters">${dueBadge(t)}${t.priority==='high'?'<span class="badge bad">High</span>':t.priority==='low'?'<span class="badge">Low</span>':''}${ss.length?`<span class="badge${sd===ss.length?' ok':''}">${ic('check',12)} ${sd}/${ss.length}</span>`:''}${t.description?`<span title="Has a description">${ic('file',14)}</span>`:''}</span>${avs(t.assignees)}</div></article>`}
 
 function vTaskList(p){const mine=!!S.tmine,rows=[];

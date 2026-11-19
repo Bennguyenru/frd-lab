@@ -42,6 +42,8 @@ Radius: `--r-xs` 6 (badges), `--r-sm` 8 (buttons, inputs), `--r-md` 10 (rows, na
 | Row | `.prow`, `.row` | | hover | Icon, two lines of text, one action |
 | Stat tile | `.stat` | icon colour `.g .b .y .p .r` | | Number first, label second |
 | Quick actions | `.qas` / `.qa` | `.pri` | hover | Directly under the stats, at most four |
+| Hero action | `.hbtn` (button), `.hdone` (status) | | hover | One action inside the welcome banner, e.g. Check in now / Checked in at 10:18 |
+| Text clamp | `.clamp1`, `.clamp2` | | | Long titles: board cards clamp at 3 lines, project cards at 2; full text in `title` |
 | Progress | `.bar > i` | | | Width is the percentage |
 | Dialog | `.ov > .dlg` | | Escape closes | Built by `modal()`; focus moves to the first field |
 | Toast | `#toast` | | | `role=status`, one short sentence |
