@@ -157,7 +157,9 @@ pre,.scroll{overflow-x:auto}
 .kcards{display:flex;flex-direction:column;gap:8px;min-height:44px;border-radius:8px;padding:2px;transition:background .15s}.kcards.over{background:var(--gT)}
 .kempty{font-size:13px;text-align:center;margin:10px 0}
 .kc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 0 rgba(0,3,61,.06)}
-.kc:hover{border-color:var(--g)}.kc.drag{opacity:.4}.kc.hi{border-left:4px solid var(--bad)}.kc.done>b{text-decoration:line-through;color:var(--mute)}
+.kc:hover{border-color:var(--g)}.kc.drag{opacity:.35}.kc[data-drag]{cursor:grab;user-select:none;-webkit-user-select:none}
+.kghost{position:fixed;left:0;top:0;z-index:30;pointer-events:none;box-shadow:0 14px 32px rgba(0,3,61,.28);opacity:.96;cursor:grabbing}.kph{height:4px;border-radius:2px;background:var(--g);flex:none}
+body.dragging,body.dragging *{cursor:grabbing!important;user-select:none!important}.kc.hi{border-left:4px solid var(--bad)}.kc.done>b{text-decoration:line-through;color:var(--mute)}
 .kc>b{color:var(--ink);font-weight:600;font-size:14px;overflow-wrap:anywhere}
 .kmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;font-size:12px;color:var(--mute)}.kmeta .badge{display:inline-flex;align-items:center;gap:3px}
 .kadd{display:flex;gap:6px}.kadd input,.kadd select{padding:8px 10px;font-size:14px}
@@ -680,7 +682,7 @@ function vBoard(p){const ed=canEditP(p),man=canManP(p),m=mainT(p);
   return `<div class="kb">${cols}${ed?`<section class="kcol kcol-add"><label for="nl-${esc(p.id)}">Add a list</label><div class="kadd"><input id="nl-${esc(p.id)}" data-nl="${esc(p.id)}" placeholder="List name, e.g. Blocked"><button class="btn sm" data-act="ls-add" data-p="${esc(p.id)}">Add</button></div></section>`:''}</div>
   ${ed?'<p class="mute" style="font-size:13px">Drag a card to another list, or open it and change the list. Cards in a list marked done count as finished.</p>':''}`}
 function kCard(p,t,ed){const ss=subsOf(p,t.id),sd=ss.filter(x=>x.done).length;
-  return `<article class="kc${t.done?' done':''}${t.priority==='high'?' hi':''}" ${ed?'draggable="true"':''} tabindex="0" data-act="tk" data-p="${esc(p.id)}" data-id="${esc(t.id)}" aria-label="${esc(t.title)}"><b>${esc(t.title)}</b>
+  return `<article class="kc${t.done?' done':''}${t.priority==='high'?' hi':''}" ${ed?'data-drag="1"':''} tabindex="0" data-act="tk" data-p="${esc(p.id)}" data-id="${esc(t.id)}" aria-label="${esc(t.title)}"><b>${esc(t.title)}</b>
     <div class="kmeta"><span class="filters">${dueBadge(t)}${t.priority==='high'?'<span class="badge bad">High</span>':t.priority==='low'?'<span class="badge">Low</span>':''}${ss.length?`<span class="badge${sd===ss.length?' ok':''}">${ic('check',12)} ${sd}/${ss.length}</span>`:''}${t.description?`<span title="Has a description">${ic('file',14)}</span>`:''}</span>${avs(t.assignees)}</div></article>`}
 
 function vTaskList(p){const mine=!!S.tmine,rows=[];
@@ -792,6 +794,7 @@ const val=id=>(document.getElementById(id)?.value||'').trim();
 document.addEventListener('click',e=>{
   const cx=e.target.closest('[data-x=close]');if(cx&&(cx.tagName==='BUTTON'||e.target===cx)){closeM();return}
   const el=e.target.closest('[data-act]');if(!el||el.disabled)return;
+  if(S.noClick&&Date.now()-S.noClick<400&&el.classList.contains('kc'))return;
   const{act,id,u,d,k,n,v}=el.dataset;
   if(!S.db&&act!=='back')return;
   switch(act){
@@ -896,10 +899,26 @@ document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;c
   if(e.key==='Enter'&&t.dataset?.nl){e.preventDefault();t.parentElement.querySelector('[data-act=ls-add]')?.click();return}
   if(e.key==='Enter'&&t.id==='st-t'){e.preventDefault();$('[data-act=st-add]')?.click();return}
   if(t.classList?.contains('kc')){e.preventDefault();tkOpen(t.dataset.p,t.dataset.id)}});
-document.addEventListener('dragstart',e=>{const c=e.target.closest?.('.kc');if(!c)return;S.drag=c.dataset.id;try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',c.dataset.id)}catch{}c.classList.add('drag')});
-document.addEventListener('dragend',()=>{S.drag=null;document.querySelectorAll('.kc.drag').forEach(x=>x.classList.remove('drag'));document.querySelectorAll('.kcards.over').forEach(x=>x.classList.remove('over'))});
-document.addEventListener('dragover',e=>{const z=e.target.closest?.('.kcards');if(!z||!S.drag)return;e.preventDefault();document.querySelectorAll('.kcards.over').forEach(x=>{if(x!==z)x.classList.remove('over')});z.classList.add('over')});
-document.addEventListener('drop',e=>{const z=e.target.closest?.('.kcards');if(!z||!S.drag)return;e.preventDefault();z.classList.remove('over');const id=S.drag;S.drag=null;const b=e.target.closest('.kc');moveCard(id,z.dataset.drop,b&&b.dataset.id!==id?b.dataset.id:null)});
+/* Card drag: pointer events (mouse and pen). On touch screens, open the card and change its list. */
+let PD=null;
+document.addEventListener('pointerdown',e=>{if(e.button!==0||e.pointerType==='touch')return;const c=e.target.closest?.('.kc[data-drag]');if(!c||e.target.closest('button,a,input,select,textarea'))return;PD={id:c.dataset.id,c,x:e.clientX,y:e.clientY,on:false}});
+document.addEventListener('pointermove',e=>{if(!PD)return;
+  if(!PD.on){if(Math.hypot(e.clientX-PD.x,e.clientY-PD.y)<6)return;PD.on=true;const r=PD.c.getBoundingClientRect();PD.dx=PD.x-r.left;PD.dy=PD.y-r.top;
+    const g=PD.c.cloneNode(true);g.classList.add('kghost');g.removeAttribute('data-act');g.removeAttribute('tabindex');g.style.width=r.width+'px';document.body.appendChild(g);PD.g=g;PD.c.classList.add('drag');document.body.classList.add('dragging')}
+  e.preventDefault();PD.g.style.transform=`translate(${e.clientX-PD.dx}px,${e.clientY-PD.dy}px) rotate(2deg)`;
+  const el=document.elementFromPoint(e.clientX,e.clientY),z=el&&el.closest('.kcards');
+  document.querySelectorAll('.kcards.over').forEach(x=>{if(x!==z)x.classList.remove('over')});
+  let b=null;if(z){z.classList.add('over');for(const k of z.querySelectorAll('.kc')){if(k===PD.c)continue;const r=k.getBoundingClientRect();if(e.clientY<r.top+r.height/2){b=k;break}}}
+  if(z!==PD.z||b!==PD.b){document.querySelectorAll('.kph').forEach(x=>x.remove());if(z){const ph=document.createElement('div');ph.className='kph';ph.setAttribute('aria-hidden','true');z.insertBefore(ph,b)}}
+  PD.z=z;PD.b=b;
+  const kb=document.querySelector('.kb');if(kb){const r=kb.getBoundingClientRect();if(e.clientX>r.right-48)kb.scrollLeft+=14;else if(e.clientX<r.left+48)kb.scrollLeft-=14}});
+function pdEnd(drop){if(!PD)return;const d=PD;PD=null;document.querySelectorAll('.kph').forEach(x=>x.remove());document.querySelectorAll('.kcards.over').forEach(x=>x.classList.remove('over'));
+  if(!d.on)return;document.body.classList.remove('dragging');d.g?.remove();d.c.classList.remove('drag');S.noClick=Date.now();
+  if(drop&&d.z)moveCard(d.id,d.z.dataset.drop,d.b?d.b.dataset.id:null)}
+document.addEventListener('pointerup',()=>pdEnd(true));
+document.addEventListener('pointercancel',()=>pdEnd(false));
+addEventListener('blur',()=>pdEnd(false));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&PD)pdEnd(false)},true);
 document.addEventListener('change',async e=>{const t=e.target;if(!t.dataset?.roleU)return;const u=t.dataset.roleU,prev=S.prof[u]?.role;
   try{await upd('profiles',{role:t.value},{id:u});toast(nm(u)+' is now '+(t.value==='admin'?'an admin':t.value==='member'?'a member':'inactive')+'.');reloadSoon()}catch(err){fail(err);t.value=prev}});
 async function adminFn(body,quiet){const{data,error}=await SB.functions.invoke('admin-users',{body});
